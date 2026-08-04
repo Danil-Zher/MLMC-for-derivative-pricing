@@ -201,10 +201,6 @@ class Lookback_call(Option):
         return (self.S_T - self.S_min)
 
 class Digital_call(Option):
-    
-    def __init__(self, T, K):
-        super().__init__(T, K)
-        self.weak_order = 0.5
         
     def statistics(self, M, S_0):
         # We only need S_T for computing the payoff of a Digital call option.
@@ -588,11 +584,21 @@ class MLMC:
                     
                     Y_l[l] = Y_sum[l] / M_sim[l]
                     var[l] = (Y_squared_sum[l] - M_sim[l] * Y_l[l]**2) / (M_sim[l] - 1)
-                            
-                # Compute optimal number of samples level-wise    
-                A = np.sum(np.sqrt(var[:L+1] / dt[:L+1]))
                 
-                M_l_opt[:L+1] = np.ceil((2 * eps**(-2) * np.sqrt(var[:L+1] * dt[:L+1])) * A).astype(int)
+                # The copy of the var array that affects only the sample allocation
+                var_allocation = var[:L+1].copy()
+                positive_var = var_allocation > 0
+                
+                if positive_var.sum() >= 2 and not positive_var.all():
+                     level = np.arange(L+1)[positive_var]
+                     slope, intercept = np.polyfit(level, np.log(var_allocation[positive_var]), deg = 1)
+                     zero_var = ~positive_var
+                     var_allocation[zero_var] = np.exp(intercept + slope * np.arange(L+1)[zero_var])
+                     
+                # Compute optimal number of samples level-wise    
+                A = np.sum(np.sqrt(var_allocation[:L+1] / dt[:L+1]))
+                
+                M_l_opt[:L+1] = np.ceil((2 * eps**(-2) * np.sqrt(var_allocation[:L+1] * dt[:L+1])) * A).astype(int)
                 
             # Recalculate the bias                
             bias = np.maximum(N ** (- option.weak_order) * np.abs(Y_l[L-1]), np.abs(Y_l[L]))
@@ -673,7 +679,7 @@ class Analysis:
         if mask.sum() >= 3:
             # Fit a linear model. Take the last 3 point to capture the true
             # asymptotics and ignore the pre-asymptotics.
-            slope, intersect = np.polyfit(l[mask][-3:], log_var[mask][-3:], deg = 1)
+            slope, intercept = np.polyfit(l[mask][-3:], log_var[mask][-3:], deg = 1)
             slope_rounded = round(slope * 2) / 2
             
             # Reference line
@@ -681,7 +687,6 @@ class Analysis:
             ref_slope = (slope_rounded * var_ref +
                          (log_var[mask][-1] - slope_rounded * l[mask][-1] - 3))
             
-
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
@@ -692,10 +697,11 @@ class Analysis:
         ax.plot(l[mask][1:], log_var[1:], marker = 'o', linestyle = '-', markersize = 6, linewidth = 3, label = 'MLMC for P_l - P_{l-1}', color = 'b')
         ax.plot(var_ref, ref_slope, marker = 'o', linestyle = '--', markersize = 4, linewidth = 3, label = f'Slope = {slope_rounded}', color = 'b')
         
-        ax.set_title(f'{result_MLMC.option_name} option, {result_MLMC.scheme_name}', fontsize = 20)
-        ax.set_xlabel('Level l', fontsize = 24)
-        ax.set_ylabel('log_N variance of estimates', fontsize = 24)
-        ax.legend(fontsize = 18)
+        ax.set_title(f'{result_MLMC.option_name} option, {result_MLMC.scheme_name}', fontsize = 26)
+        ax.set_xlabel('Level l', fontsize = 30)
+        ax.set_ylabel(r'$\log_N$ Variance', fontsize = 30)
+        ax.legend(fontsize = 22)
+        ax.tick_params(axis='both', labelsize = 22)
         ax.grid(True)
         
         if ax is None:
@@ -720,7 +726,7 @@ class Analysis:
             
             # Fit a linear model. Take the last 3 point to capture the true
             # asymptotics and ignore the pre-asymptotics.
-            slope, intersect = np.polyfit(l[mask][-3:], log_Y_l[mask][-3:], deg = 1)
+            slope, intercept = np.polyfit(l[mask][-3:], log_Y_l[mask][-3:], deg = 1)
             slope_rounded = round(slope * 2) / 2
             
             # Reference line
@@ -738,10 +744,11 @@ class Analysis:
         ax.plot(l[mask][1:], log_Y_l[1:], marker = 'o', linestyle = '-', markersize = 6, label = 'MLMC for P_l - P_{l-1}', color = 'b', linewidth = 3)
         ax.plot(var_ref, ref_slope, marker = 'o', linestyle = '--', markersize = 4, label = f'Slope = {slope_rounded}', color = 'b', linewidth = 3)
         
-        ax.set_title(f'{result_MLMC.option_name} option, {result_MLMC.scheme_name}', fontsize = 20)
-        ax.set_xlabel('Level l', fontsize = 24)
-        ax.set_ylabel('log_N corrections mean E[Y_l]', fontsize = 24)
-        ax.legend(fontsize = 18)
+        ax.set_title(f'{result_MLMC.option_name} option, {result_MLMC.scheme_name}', fontsize = 26)
+        ax.set_xlabel('Level l', fontsize = 30)
+        ax.set_ylabel(r'$\log_N$ |Mean|', fontsize = 30)
+        ax.legend(fontsize = 22)
+        ax.tick_params(axis='both', labelsize = 22)
         ax.grid(True)
         
         if ax is None:
@@ -763,10 +770,11 @@ class Analysis:
             ax.plot(l, M_l, marker = 'o', linestyle = '-', markersize = 6, linewidth = 3, label = rf'$\epsilon$ = {result_MLMC_eps_sweep.eps_set[i]}')
 
         ax.set_yscale('log')
-        ax.set_title(f'{result_MLMC_eps_sweep.option_name} option, {result_MLMC_eps_sweep.scheme_name}', fontsize = 20)
-        ax.set_xlabel('Level l', fontsize = 24)
-        ax.set_ylabel('Number of samples M_l', fontsize = 24)
-        ax.legend(fontsize = 18)
+        ax.set_title(f'{result_MLMC_eps_sweep.option_name} option, {result_MLMC_eps_sweep.scheme_name}', fontsize = 26)
+        ax.set_xlabel('Level l', fontsize = 30)
+        ax.set_ylabel(r'Number of samples $M_l$', fontsize = 30)
+        ax.legend(fontsize = 22)
+        ax.tick_params(axis='both', labelsize = 22)
         ax.grid(True)
         
         if ax is None:
@@ -795,24 +803,24 @@ class Analysis:
             for l in range(1, L + 1):
                 MLMC_cost[i] += M_l[l] * (N**l + N**(l-1))
              
-            N_star = 2 * epsilon[i]**(-2) * result_sl_MC_sweep.variances[:L+1]
-            MC_cost[i] = np.sum(N_star * result_sl_MC_sweep.N ** np.arange(L+1))
+            M_star = 2 * epsilon[i]**(-2) * result_sl_MC_sweep.variances[:L+1]
+            MC_cost[i] = np.sum(M_star * result_sl_MC_sweep.N ** np.arange(L+1))
              
         if ax is None:
             fig, ax = plt.subplots(figsize=(10, 5))
         else:
             fig = ax.figure
-        
-        
+
         ax.plot(epsilon, epsilon**2 * MC_cost, marker = 'o', linestyle = '-', markersize = 6, linewidth = 3, label = 'Standard MC', color = 'C1')
         ax.plot(epsilon, epsilon**2 * MLMC_cost, marker = 'o', linestyle = '-', markersize = 6, linewidth = 3, label = 'MLMC', color = 'b')
 
         ax.set_xscale('log')
         ax.set_yscale('log')
-        ax.set_title(f'{result_MLMC_eps_sweep.option_name} option, {result_MLMC_eps_sweep.scheme_name}', fontsize = 20)
-        ax.set_xlabel(r'Accuracy $\epsilon$', fontsize = 24)
-        ax.set_ylabel(r'$\epsilon^2$ Cost', fontsize = 24)
-        ax.legend(fontsize = 18)
+        ax.set_title(f'{result_MLMC_eps_sweep.option_name} option, {result_MLMC_eps_sweep.scheme_name}', fontsize = 26)
+        ax.set_xlabel(r'Accuracy $\epsilon$', fontsize = 30)
+        ax.set_ylabel(r'$\epsilon^2$ Cost', fontsize = 30)
+        ax.legend(fontsize = 22)
+        ax.tick_params(axis='both', labelsize = 22)
         ax.grid(True)
         
         if ax is None:
