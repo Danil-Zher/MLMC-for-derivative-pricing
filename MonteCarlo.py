@@ -6,9 +6,18 @@ import warnings
 from dataclasses import dataclass
 
 
-class Black_Scholes:
+class Model:
     '''
-    This class sets parameters of the Black-Scholes model.
+    
+    '''
+    def __init__(self, r, sigma):
+        self.r = r
+        self.sigma = sigma
+
+class Black_Scholes(Model):
+    '''
+    This class sets parameters of the Black-Scholes model:
+        dS_t = r S_t dt + sigma S_t dW_t.
     These parameters are used to model the stock price dynamics.
     
     Attributes: 
@@ -21,8 +30,7 @@ class Black_Scholes:
         diffusion_derivative - the method returns derivative of the diffusion term.
      '''
     def __init__(self, r, sigma):
-        self.r = r
-        self.sigma = sigma
+        super().__init__(r, sigma)
         
     def drift(self, S):
         return self.r * S
@@ -33,10 +41,39 @@ class Black_Scholes:
     def diffusion_derivative(self):
         return self.sigma    
     
+class Heston(Model):
+    '''
+    dS_t = r S_t dt + sqrt(V_t) S_t dW_1_t
+    dV_t = kappa (theta - V_t) dt + sigma sqrt(V_t) dW_2_t
+    
+    X = log(S)
+    
+    dX_t = (r - 1/2 V_t) dt + sqrt(V_t) dW_1_t
+    dV_t = kappa (theta - V_t) dt + sigma sqrt(V_t) dW_2_t
+    '''
+    
+    def __init__(self, r, sigma, kappa, theta):
+        super().__init__(r, sigma)
+        self.kappa = kappa
+        self.theta = theta
+        
+    def drift_X(self, V):
+        return (self.r - 1/2 * V)
+    
+    def diffusion_X(self, V):
+        return np.sqrt(V)
+    
+    def drift_V(self, V):
+        return self.kappa * (self.theta - V)
+    
+    def diffusion_V(self, V):
+        return self.sigma * np.sqrt(V)
+    
 
 class Scheme:
     '''
-    This class defines a base class of approximating schemes.
+    This class defines a base class of approximating schemes
+    used in the numerical solution of scalar SDE's.
     
     Attributes:
         model - the model governing the stock price dynamics.
@@ -72,6 +109,28 @@ class Milstein_scheme(Scheme):
                0.5 * self.model.diffusion(S) * 
                self.model.diffusion_derivative() * (dW**2 - dt)
                )
+    
+    
+class log_Heston_Milstein():
+    
+    def __init__(self, model):
+        self.model = model
+    
+    def step(self, X, V, dt, dW_1, dW_2):
+        
+        X_new = (X + self.model.drift_X(V) * dt +
+                 self.model.diffusion_X(V) * dW_1 +
+                 1/4 * self.model.sigma * dW_1 * dW_2)
+        
+        denomenator_factor = 1 / (1 + self.model.kappa * dt)
+        
+        V_new = (V + self.model.kappa * self.model.theta * dt +
+                 self.model.diffusion_V(V) * dW_2 +
+                 1/4 * self.model.sigma**4 * (dW_2**2 - dt)) * denomenator_factor
+        
+        V_new = np.maximum(V_new, 0)
+
+        return X_new, V_new
 
 
 class Option:
@@ -253,6 +312,7 @@ class Single_level_MC_result(Result):
         std - the standard deviation of the estimated option price.
     '''
     price: float
+    price_std: float
     std: float
 
 @dataclass
@@ -279,7 +339,7 @@ class MLMC_result(Result):
     
     Attributes:
         price - the MLMC estimate of the option price;
-        std - the standard deviation of the estimated option price;
+        price_std - the standard deviation of the estimated option price;
         Y_l - list of MC estimates of the correction terms Y_l;
         var - list of sample variances Var[Y_l] of the correction terms;
         M_sim - list of numbers of simulations performed level-wise;
@@ -288,7 +348,7 @@ class MLMC_result(Result):
         eps - required RMSE error.
     '''
     price: float
-    std: float
+    price_std: float
     Y_l: np.ndarray
     var: np.ndarray
     M_sim: np.ndarray
@@ -378,10 +438,13 @@ class Single_level_MC:
         
         a_M = np.mean(V)
         b_M = np.std(V, ddof = 1)
+        
+        price_std = b_M / np.sqrt(M)
             
         return Single_level_MC_result(option = option,
                                       scheme = scheme,
                                       price = a_M,
+                                      price_std = price_std,
                                       std = b_M)
     
     def run_levels_sweep(self, scheme, option, S_0, M, L, N = 2, bridge = False):
@@ -402,7 +465,61 @@ class Single_level_MC:
                                             prices = prices,
                                             variances = variances,
                                             N = N,
-                                            L = L)        
+                                            L = L)    
+
+    def run_heston(self, scheme, option, S_0, V_0, M, N):
+        
+        rng = np.random.default_rng()
+        
+        dt = option.T / N
+        sq_dt = np.sqrt(dt)
+        
+        X = np.full(M, np.log(S_0))
+        V = np.full(M, V_0)
+        
+        option.statistics(M, S_0)
+        
+        for i in range(N):
+            
+            dW_1 = sq_dt * rng.normal(loc = 0, scale = 1, size = M)
+            dW_2 = sq_dt * rng.normal(loc = 0, scale = 1, size = M)
+            
+            X, V = scheme.step(X, V, dt, dW_1, dW_2)
+            
+            option.update_statistics(np.exp(X), dt, scheme.model)
+            
+        P = np.exp(- scheme.model.r * option.T) * option.payoff()
+        
+        a_M = np.mean(P)
+        b_M = np.std(P, ddof = 1)
+        
+        price_std = b_M / np.sqrt(M)
+        
+        return Single_level_MC_result(option = option,
+                                      scheme = scheme,
+                                      price = a_M,
+                                      price_std = price_std,
+                                      std = b_M)
+    
+    def run_heston_levels_sweep(self, scheme, option, S_0, V_0, M, L, N = 2):
+        
+        # Lists of prices and their sample variances
+        prices = np.zeros(L + 1)
+        variances = np.zeros(L + 1)
+                        
+        for l in range(L + 1):
+            
+            res = self.run_heston(scheme, option, S_0, V_0, M, N**l)
+            
+            prices[l] = res.price
+            variances[l] = res.std ** 2
+
+        return Single_level_MC_sweep_result(option = option,
+                                            scheme = scheme,
+                                            prices = prices,
+                                            variances = variances,
+                                            N = N,
+                                            L = L)
 
 
 class MLMC:
@@ -614,7 +731,7 @@ class MLMC:
         return MLMC_result(option = option,
                            scheme = scheme,
                            price = Y_hat,
-                           std = Y_l_std,
+                           price_std = Y_l_std,
                            Y_l = Y_l[:L+1],
                            var = var[:L+1],
                            M_sim = M_sim[:L+1],
@@ -643,7 +760,204 @@ class MLMC:
                                      M_l = M_l,
                                      L = L,
                                      N = N,
-                                     eps_set = eps_set)            
+                                     eps_set = eps_set)    
+
+    def run_antithetic(self, scheme, option, S_0, V_0, M_in, eps, N = 2, antithetic = True):
+        
+        if N != 2:
+            raise ValueError("Antithetic approach requires N = 2.")
+        
+        rng = np.random.default_rng()
+        
+        # Maximum value of L with a reserve
+        L_max = 20
+        
+        # Initial value of L
+        L = 1
+        
+        # Create 2 copies of the option object - one for the fine grid,
+        # the second one for the coarse grid
+        option_f = copy.deepcopy(option)
+        option_c = copy.deepcopy(option)
+        if antithetic:
+            option_a = copy.deepcopy(option)
+        
+        # Cumulative sums of the samples over all iterations for all levels
+        Y_sum = np.zeros(L_max + 1)
+        
+        # Cumulative sums of squares of the samples
+        # over all iterations for all levels
+        Y_squared_sum = np.zeros(L_max + 1)
+
+        # Estimators Y_l at the current iteration for all levels
+        Y_l = np.zeros(L_max + 1)
+
+        # Current (at given iteration) sample variances
+        # of MC estimators at given level l
+        var = np.zeros(L_max + 1)
+        
+        # Optimal number of samples at level l
+        M_l_opt = np.full(L_max + 1, M_in)
+        
+        # Number of performed simulation at level l.
+        # It takes into account all iterations.
+        M_sim = np.zeros(L_max + 1, dtype = np.int64)
+        
+        # Discretisation steps
+        dt = option.T / N**np.arange(L_max + 1)
+        sq_dt = np.sqrt(dt)
+        
+        # Initial value of the bias chosen randomly large
+        # to enter the following loop
+        bias = np.inf
+        
+        # Loop responsible for the bias convergence
+        while (L < L_max) and (bias >= 1/np.sqrt(2) * (N ** option.weak_order - 1) * eps):
+            
+            L += 1
+            
+            # Loop responsible for the variance convergence
+            while np.any(M_sim[:L+1] < M_l_opt[:L+1]):
+                
+                # Calculation of all Y_l individually
+                for l in range(L + 1):
+                    
+                    if M_sim[l] >= M_l_opt[l]:
+                        continue
+                    
+                    # Number of samples to be additionally computed
+                    # at j_th iteration to obtain the
+                    # optimal number of samples.
+                    delta = M_l_opt[l] - M_sim[l]
+                                        
+                    X0 = np.full(delta, np.log(S_0))
+                    V0 = np.full(delta, V_0)
+                    
+                    if l == 0:
+                    
+                        option_f.statistics(delta, S_0)
+                    
+                        dW_1 = sq_dt[0] * rng.normal(loc = 0, scale = 1, size = delta)
+                        dW_2 = sq_dt[0] * rng.normal(loc = 0, scale = 1, size = delta)
+                        
+                        X, V = scheme.step(X0, V0, dt[0], dW_1, dW_2)
+                        
+                        option_f.update_statistics(np.exp(X), dt[0], scheme.model)
+                        
+                        diff = np.exp(- scheme.model.r * option.T) * option_f.payoff()
+                        
+                    else:
+                        
+                        option_f.statistics(delta, S_0)
+                        option_c.statistics(delta, S_0)
+                        if antithetic:
+                            option_a.statistics(delta, S_0)
+                        
+                        dW_1_1 = sq_dt[l] * rng.normal(loc = 0, scale = 1, size = (N**(l-1), delta))
+                        dW_1_2 = sq_dt[l] * rng.normal(loc = 0, scale = 1, size = (N**(l-1), delta))
+                        dW_2_1 = sq_dt[l] * rng.normal(loc = 0, scale = 1, size = (N**(l-1), delta))
+                        dW_2_2 = sq_dt[l] * rng.normal(loc = 0, scale = 1, size = (N**(l-1), delta))
+                        
+                        X_f, V_f = X0.copy(), V0.copy()
+                        X_c, V_c = X0.copy(), V0.copy()
+                        if antithetic:
+                            X_a, V_a = X0.copy(), V0.copy()
+                        
+                        for i in range(N**(l-1)):
+                            
+                            X_f, V_f = scheme.step(X_f, V_f, dt[l], dW_1_1[i], dW_2_1[i])
+                            option_f.update_statistics(np.exp(X_f), dt[l], scheme.model)
+                            X_f, V_f = scheme.step(X_f, V_f, dt[l], dW_1_2[i], dW_2_2[i])
+                            option_f.update_statistics(np.exp(X_f), dt[l], scheme.model)
+                            
+                            if antithetic:                            
+                                X_a, V_a = scheme.step(X_a, V_a, dt[l], dW_1_2[i], dW_2_2[i])
+                                option_a.update_statistics(np.exp(X_a), dt[l], scheme.model)
+                                X_a, V_a = scheme.step(X_a, V_a, dt[l], dW_1_1[i], dW_2_1[i])
+                                option_a.update_statistics(np.exp(X_a), dt[l], scheme.model)
+                            
+                            X_c, V_c = scheme.step(X_c, V_c, dt[l-1], dW_1_1[i] + dW_1_2[i], dW_2_1[i] + dW_2_2[i])
+                            option_c.update_statistics(np.exp(X_c), dt[l-1], scheme.model)
+                            
+                            
+                        P_f = np.exp(- scheme.model.r * option.T) * option_f.payoff()
+                        P_c = np.exp(- scheme.model.r * option.T) * option_c.payoff()
+                        
+                        if antithetic:
+                            P_a = np.exp(- scheme.model.r * option.T) * option_a.payoff()
+                            diff = 1/2 * (P_f + P_a) - P_c
+                        else:
+                            diff = P_f - P_c
+                            
+                    Y_sum[l] += np.sum(diff)
+                    Y_squared_sum[l] += np.sum(diff**2)
+                    
+                    M_sim[l] += delta
+                    
+                    Y_l[l] = Y_sum[l] / M_sim[l]
+                    var[l] = (Y_squared_sum[l] - M_sim[l] * Y_l[l]**2) / (M_sim[l] - 1)
+                
+                # The copy of the var array that affects only the sample allocation
+                var_allocation = var[:L+1].copy()
+                positive_var = var_allocation > 0
+                
+                if positive_var.sum() >= 2 and not positive_var.all():
+                     level = np.arange(L+1)[positive_var]
+                     slope, intercept = np.polyfit(level, np.log(var_allocation[positive_var]), deg = 1)
+                     zero_var = ~positive_var
+                     var_allocation[zero_var] = np.exp(intercept + slope * np.arange(L+1)[zero_var])
+                     
+                # Compute optimal number of samples level-wise    
+                A = np.sum(np.sqrt(var_allocation[:L+1] / dt[:L+1]))
+                
+                M_l_opt[:L+1] = np.ceil((2 * eps**(-2) * np.sqrt(var_allocation[:L+1] * dt[:L+1])) * A).astype(int)
+                
+            # Recalculate the bias                
+            bias = np.maximum(N ** (- option.weak_order) * np.abs(Y_l[L-1]), np.abs(Y_l[L]))
+                
+            if L == L_max:
+                warnings.warn("Maximum level reached before bias convergence")
+                break
+        
+        Y_hat = np.sum(Y_l[:L+1])
+        
+        Y_l_std = np.sqrt(np.sum(var[:L+1] / M_sim[:L+1]))
+
+        return MLMC_result(option = option,
+                           scheme = scheme,
+                           price = Y_hat,
+                           price_std = Y_l_std,
+                           Y_l = Y_l[:L+1],
+                           var = var[:L+1],
+                           M_sim = M_sim[:L+1],
+                           L = L,
+                           N = N,
+                           eps = eps)    
+
+    def run_antithetic_eps_sweep(self, scheme, option, S_0, V_0, M_in, eps_set, N = 2, antithetic = True):
+        
+        # List of arrays of number of samples level-wise
+        M_l = []
+        
+        # List of the finest levels reached, one per eps in eps_set
+        L = []
+        
+        for i in range(len(eps_set)):
+            
+            res = self.run_antithetic(scheme, option, S_0, V_0,
+                                      M_in, eps_set[i], N, antithetic)
+        
+            M_l.append(res.M_sim)
+            
+            L.append(res.L)
+        
+        return MLMC_eps_sweep_result(option = option,
+                                     scheme = scheme,
+                                     M_l = M_l,
+                                     L = L,
+                                     N = N,
+                                     eps_set = eps_set)  
+        
             
 
 class Analysis:
@@ -661,7 +975,7 @@ class Analysis:
     '''
     def output(self, result):
         print(f'Price of the {result.option_name}: {result.price:.5f}')
-        print(f'Standard deviation of the {result.option_name} price: {result.std:.5f}')
+        print(f'Standard deviation of the {result.option_name} price: {result.price_std:.5f}')
 
     def log_variance_plot(self, result_MLMC, result_sl_MC_sweep = None, ax = None):
         
