@@ -46,10 +46,10 @@ Digital_call_st_run = Standard_MC.run(M_scheme, Digital_call_option,
                                       S_0 = 100, M = 10_000, N = 1000, bridge = True)
 
 European_call_heston_st_run = Standard_MC.run_heston(Milstein_Heston, European_call_option, 
-                                                     S_0 = 1, V_0 = 1, M = 10_000, N = 1000)
+                                                     S_0 = 100, V_0 = 0.04, M = 10_000, N = 1000)
 
 Asian_call_heston_st_run = Standard_MC.run_heston(Milstein_Heston, Asian_call_option, 
-                                                     S_0 = 1, V_0 = 1, M = 10_000, N = 1000)
+                                                     S_0 = 100, V_0 = 0.04, M = 10_000, N = 1000)
 
 
 # Run the MLMC algorithm and store the output in corresponding objects.
@@ -74,19 +74,19 @@ Digital_call_MLMC_run = Multilevel_MC.run(M_scheme, Digital_call_option,
                                           N = 2, bridge = True)
 
 European_call_MLMC_heston_antithetic_run = Multilevel_MC.run_antithetic(Milstein_Heston, European_call_option,
-                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps = 0.0003,
+                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps = 0.01,
                                                              N = 2, antithetic = True)
 
 European_call_MLMC_heston_run = Multilevel_MC.run_antithetic(Milstein_Heston, European_call_option,
-                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps = 0.0003,
+                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps = 0.0003,
                                                              N = 2, antithetic = False)
 
 Asian_call_MLMC_heston_antithetic_run = Multilevel_MC.run_antithetic(Milstein_Heston, Asian_call_option,
-                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps = 0.001,
+                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps = 0.001,
                                                              N = 2, antithetic = True)
 
 Asian_call_MLMC_heston_run = Multilevel_MC.run_antithetic(Milstein_Heston, Asian_call_option,
-                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps = 0.001,
+                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps = 0.001,
                                                              N = 2, antithetic = False)
 
 # Run MLMC_eps_sweep for a set of accuracies.
@@ -111,22 +111,22 @@ Digital_call_MLMC_eps_sweep = Multilevel_MC.run_eps_sweep(M_scheme, Digital_call
                                                           S_0 = 100, M_in = 1000, eps_set = accuracy,
                                                           N = 2, bridge = True)
 
-accuracy = [0.01, 0.005, 0.001, 0.0005, 0.0003]
+accuracy = [0.01, 0.005, 0.001, 0.0005, 0.0003, 0.0001]
 European_call_MLMC_heston_eps_antithetic_sweep = Multilevel_MC.run_antithetic_eps_sweep(Milstein_Heston, European_call_option,
-                                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps_set = accuracy,
+                                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps_set = accuracy,
                                                                              N = 2, antithetic = True)
 
 European_call_MLMC_heston_eps_sweep = Multilevel_MC.run_antithetic_eps_sweep(Milstein_Heston, European_call_option,
-                                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps_set = accuracy,
+                                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps_set = accuracy,
                                                                              N = 2, antithetic = False)
 
-accuracy = [0.3, 0.1, 0.05, 0.01, 0.005, 0.001]
+accuracy = [0.5, 0.3, 0.1, 0.05, 0.01, 0.005]
 Asian_call_MLMC_heston_eps_antithetic_sweep = Multilevel_MC.run_antithetic_eps_sweep(Milstein_Heston, Asian_call_option,
-                                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps_set = accuracy,
+                                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps_set = accuracy,
                                                                              N = 2, antithetic = True)
 
 Asian_call_MLMC_heston_eps_sweep = Multilevel_MC.run_antithetic_eps_sweep(Milstein_Heston, Asian_call_option,
-                                                                             S_0 = 1, V_0 = 1, M_in = 1000, eps_set = accuracy,
+                                                                             S_0 = 100, V_0 = 0.04, M_in = 1000, eps_set = accuracy,
                                                                              N = 2, antithetic = False)
 
 
@@ -153,10 +153,10 @@ Digital_call_st_sweep = Standard_MC.run_levels_sweep(M_scheme, Digital_call_opti
                                                      N = 2, bridge = True)
 
 European_call_heston_st_sweep = Standard_MC.run_heston_levels_sweep(Milstein_Heston, European_call_option,
-                                                                    S_0 = 1, V_0 = 1, M = 10_000, L = max(European_call_MLMC_heston_antithetic_run.L, *European_call_MLMC_heston_eps_antithetic_sweep.L))
+                                                                    S_0 = 100, V_0 = 0.04, M = 10_000, L = max(European_call_MLMC_heston_antithetic_run.L, *European_call_MLMC_heston_eps_antithetic_sweep.L))
 
 Asian_call_heston_st_sweep = Standard_MC.run_heston_levels_sweep(Milstein_Heston, Asian_call_option,
-                                                                    S_0 = 100, V_0 = 0.04, M = 10_000, L = max(Asian_call_MLMC_heston_run.L, *Asian_call_MLMC_heston_eps_sweep.L))
+                                                                    S_0 = 100, V_0 = 0.04, M = 10_000, L = max(Asian_call_MLMC_heston_antithetic_run.L, *Asian_call_MLMC_heston_eps_antithetic_sweep.L))
 
 # Run the Analysis
 Analysis_MLMC = mc.Analysis()
